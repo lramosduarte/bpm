@@ -5,36 +5,33 @@ import (
 	"log/slog"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/caarlos0/env/v11"
 )
 
-const (
-	guildID = "" // TODO config this from interation
-)
+type clientTorrent interface {
+	AddTorrent(url string) error
+}
 
 type Config struct {
-	Token string `env:"DISCORD_TOKEN,required"`
+	Token string `env:"BPM_DISCORD_TOKEN,required"`
 }
 
 type Discord struct {
-	Config   *Config
-	Session  *discordgo.Session
-	commands []*Command
+	Config        *Config
+	Session       *discordgo.Session
+	GuildID       string
+	commands      []*Command
+	clientTorrent clientTorrent
 }
 
-func New() *Discord {
-	cfg := Config{}
-	if err := env.Parse(&cfg); err != nil {
-		slog.Error("failed to parse env to config", slog.String("error", err.Error()))
-	}
-	return &Discord{Config: &cfg, commands: commands}
+func New(clientTorrent clientTorrent, config *Config) *Discord {
+	return &Discord{Config: config, commands: commands, clientTorrent: clientTorrent}
 }
 
 func (d *Discord) Close() {
 	slog.Info("👋 Shutting down bot.")
 	for _, cmd := range d.commands {
 		slog.Debug("cleaning up command", slog.String("command", cmd.definition.Name))
-		err := d.Session.ApplicationCommandDelete(d.Session.State.User.ID, guildID, cmd.registered.ID)
+		err := d.Session.ApplicationCommandDelete(d.Session.State.User.ID, d.GuildID, cmd.registered.ID)
 		if err != nil {
 			slog.Error("Cannot delete", slog.String("command", cmd.definition.Name), slog.String("error", err.Error()))
 		}
@@ -57,12 +54,16 @@ func (d *Discord) Start() error {
 		return fmt.Errorf("Error(%w) opening connection", err)
 	}
 
+	if d.GuildID == "" {
+		slog.Warn("Bot is not configured.")
+	}
+
 	for _, cmd := range d.commands {
-		discordCmd, err := d.Session.ApplicationCommandCreate(d.Session.State.User.ID, guildID, cmd.definition)
+		discordCmd, err := d.Session.ApplicationCommandCreate(d.Session.State.User.ID, d.GuildID, cmd.definition)
 		if err != nil {
 			return fmt.Errorf("cannot create '%s' command: %w", discordCmd.Name, err)
 		}
-		d.Session.AddHandler(cmd.handler(cmd.definition.Name))
+		d.Session.AddHandler(cmd.handler(cmd.definition.Name, d))
 		cmd.registered = discordCmd
 	}
 

@@ -1,13 +1,17 @@
 package discord
 
 import (
-	"fmt"
+	"bpm/discord/helpers"
 	"log/slog"
 
 	"github.com/bwmarrin/discordgo"
 )
 
-type SlashHandler func(name string) func(s *discordgo.Session, i *discordgo.InteractionCreate)
+const (
+	CommandSetup = "setup"
+)
+
+type SlashHandler func(name string, discord *Discord) func(s *discordgo.Session, i *discordgo.InteractionCreate)
 
 type Command struct {
 	definition *discordgo.ApplicationCommand
@@ -21,13 +25,49 @@ var commands = []*Command{
 			Name:        "ping",
 			Description: "check the bot's responsiveness",
 		},
-		handler: func(name string) func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-			return WithCommandNameCheck(name, func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+		handler: func(name string, d *Discord) func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+			return WithCommandNameCheck(name, d, func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 				if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 					Type: discordgo.InteractionResponseChannelMessageWithSource,
 					Data: &discordgo.InteractionResponseData{
 						Title:   "🏓 Pong!",
 						Content: "bot is alive and responding!",
+					},
+				}); err != nil {
+					slog.Error("failed to respond to interaction", slog.String("error", err.Error()))
+				}
+			})
+		},
+	},
+	{
+		definition: &discordgo.ApplicationCommand{
+			Name:        CommandSetup,
+			Description: "Setup the bot for this server",
+		},
+		handler: func(name string, d *Discord) func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+			return WithCommandNameCheck(name, d, func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+				if d.GuildID == "" {
+					slog.Info("bot is being configured for the first time", slog.String("guildID", i.GuildID))
+					d.GuildID = i.GuildID
+				}
+				if d.GuildID != i.GuildID {
+					if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+						Type: discordgo.InteractionResponseChannelMessageWithSource,
+						Data: &discordgo.InteractionResponseData{
+							Content: "❌ Bot is already configured and using a different guildID. Please contact the bot administrator.",
+							Flags:   discordgo.MessageFlagsEphemeral,
+						},
+					}); err != nil {
+						slog.Error("failed to respond to interaction", slog.String("error", err.Error()))
+					}
+					return
+				}
+
+				if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+					Type: discordgo.InteractionResponseChannelMessageWithSource,
+					Data: &discordgo.InteractionResponseData{
+						Content: "✅ Bot has been configured for this server!",
+						Flags:   discordgo.MessageFlagsEphemeral,
 					},
 				}); err != nil {
 					slog.Error("failed to respond to interaction", slog.String("error", err.Error()))
@@ -46,16 +86,16 @@ var commands = []*Command{
 					Type:        discordgo.ApplicationCommandOptionAttachment,
 					Required:    false,
 				},
-				{
-					Name:        "from-url",
-					Description: "Add a torrent from a url",
-					Type:        discordgo.ApplicationCommandOptionString,
-					Required:    false,
-				},
+				// {
+				// 	Name:        "from-url",
+				// 	Description: "Add a torrent from a url",
+				// 	Type:        discordgo.ApplicationCommandOptionString,
+				// 	Required:    false,
+				// },
 			},
 		},
-		handler: func(name string) func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-			return WithCommandNameCheck(name, func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+		handler: func(name string, d *Discord) func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+			return WithCommandNameCheck(name, d, func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 				if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 					Type: discordgo.InteractionResponseChannelMessageWithSource,
 					Data: &discordgo.InteractionResponseData{
@@ -67,9 +107,7 @@ var commands = []*Command{
 				}
 
 				if len(i.ApplicationCommandData().Resolved.Attachments) == 0 {
-					s.FollowupMessageCreate(i.Interaction, false, &discordgo.WebhookParams{
-						Content: "❌ No file was uploaded.",
-					})
+					helpers.FollowUp(s, i, "❌ No file was uploaded.")
 					return
 				}
 
@@ -77,43 +115,37 @@ var commands = []*Command{
 				attachment := i.ApplicationCommandData().Resolved.Attachments[fileOpt]
 
 				if attachment.ContentType != "application/x-bittorrent" {
-					s.FollowupMessageCreate(i.Interaction, false, &discordgo.WebhookParams{
-						Content: "❌ The provided file is not a valid torrent file.",
-					})
+					helpers.FollowUp(s, i, "❌ The provided file is not a valid torrent file.")
 					return
 				}
 
-				// Download the .torrent file from Discord
-				torrentData, err := downloadFile(attachment.URL)
-				if err != nil {
-					s.FollowupMessageCreate(i.Interaction, false, &discordgo.WebhookParams{
-						Content: "❌ Failed to download the torrent file.",
-						Flags:   discordgo.MessageFlagsEphemeral,
-					})
-					return
-				}
-
-				// Send it to qBittorrent
-				if err = addTorrentToQBittorrent(torrentData); err != nil {
-					s.FollowupMessageCreate(i.Interaction, false, &discordgo.WebhookParams{
-						Content: fmt.Sprintf("❌ Failed to add torrent to qBittorrent: %v", err),
-						Flags:   discordgo.MessageFlagsEphemeral,
-					})
+				if err := d.clientTorrent.AddTorrent(attachment.URL); err != nil {
+					helpers.FollowUp(s, i, "❌ Failed to add the torrent to the download queue.")
+					slog.Error("failed to add torrent", slog.String("error", err.Error()))
 					return
 				}
 
 				slog.Debug("attachment received", slog.String("filename", attachment.Filename), slog.String("url", attachment.URL), slog.Int("size", attachment.Size))
-				s.FollowupMessageCreate(i.Interaction, false, &discordgo.WebhookParams{
-					Content: "Torrent added to the download queue! 🎉",
-				})
+				helpers.FollowUp(s, i, "Torrent added to the download queue! 🎉")
 			})
 		},
 	},
 }
 
-func WithCommandNameCheck(name string, handler func(s *discordgo.Session, i *discordgo.InteractionCreate)) func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+func WithCommandNameCheck(name string, d *Discord, handler func(s *discordgo.Session, i *discordgo.InteractionCreate)) func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	return func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		if i.ApplicationCommandData().Name != name {
+			return
+		}
+		if name != CommandSetup && d.GuildID == "" {
+			slog.Warn("bot is not configured for this server", slog.String("command", name), slog.String("guildID", i.GuildID))
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: "❌ Bot is not configured for this server. Please run the setup command.",
+					Flags:   discordgo.MessageFlagsEphemeral,
+				},
+			})
 			return
 		}
 		handler(s, i)
