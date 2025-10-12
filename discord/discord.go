@@ -1,15 +1,12 @@
 package discord
 
 import (
+	"bpm/discord/commands"
 	"fmt"
 	"log/slog"
 
 	"github.com/bwmarrin/discordgo"
 )
-
-type clientTorrent interface {
-	AddTorrent(url string) error
-}
 
 type Config struct {
 	Token string `env:"BPM_DISCORD_TOKEN,required"`
@@ -19,21 +16,21 @@ type Discord struct {
 	Config        *Config
 	Session       *discordgo.Session
 	GuildID       string
-	commands      []*Command
-	clientTorrent clientTorrent
+	commands      []*commands.Command
+	clientTorrent commands.ClientTorrent
 }
 
-func New(clientTorrent clientTorrent, config *Config) *Discord {
-	return &Discord{Config: config, commands: commands, clientTorrent: clientTorrent}
+func New(clientTorrent commands.ClientTorrent, config *Config) *Discord {
+	return &Discord{Config: config, commands: commands.Commands, clientTorrent: clientTorrent}
 }
 
 func (d *Discord) Close() {
 	slog.Info("👋 Shutting down bot.")
 	for _, cmd := range d.commands {
-		slog.Debug("cleaning up command", slog.String("command", cmd.definition.Name))
-		err := d.Session.ApplicationCommandDelete(d.Session.State.User.ID, d.GuildID, cmd.registered.ID)
+		slog.Debug("cleaning up command", slog.String("command", cmd.Definition.Name))
+		err := d.Session.ApplicationCommandDelete(d.Session.State.User.ID, d.GuildID, cmd.Registered.ID)
 		if err != nil {
-			slog.Error("Cannot delete", slog.String("command", cmd.definition.Name), slog.String("error", err.Error()))
+			slog.Error("Cannot delete", slog.String("command", cmd.Definition.Name), slog.String("error", err.Error()))
 		}
 	}
 	if d.Session != nil {
@@ -59,15 +56,32 @@ func (d *Discord) Start() error {
 	}
 
 	for _, cmd := range d.commands {
-		discordCmd, err := d.Session.ApplicationCommandCreate(d.Session.State.User.ID, d.GuildID, cmd.definition)
+		discordCmd, err := d.Session.ApplicationCommandCreate(d.Session.State.User.ID, d.GuildID, cmd.Definition)
 		if err != nil {
 			return fmt.Errorf("cannot create '%s' command: %w", discordCmd.Name, err)
 		}
-		d.Session.AddHandler(cmd.handler(cmd.definition.Name, d))
-		cmd.registered = discordCmd
+		d.Session.AddHandler(cmd.Handler(cmd.Definition.Name, d))
+		cmd.Registered = discordCmd
 	}
 
 	slog.Info("🤖 Bot is now running. Press CTRL-C to exit.")
 
 	return nil
+}
+
+func (d *Discord) IsConfigured() bool {
+	return d.GuildID != ""
+}
+
+func (d *Discord) Setup(i *discordgo.InteractionCreate) error {
+	if d.IsConfigured() {
+		return fmt.Errorf("bot is already configured")
+	}
+	d.GuildID = i.GuildID
+	slog.Info("bot has been configured", slog.String("guildID", d.GuildID))
+	return nil
+}
+
+func (d *Discord) Torrent() commands.ClientTorrent {
+	return d.clientTorrent
 }
