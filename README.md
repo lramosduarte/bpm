@@ -49,13 +49,13 @@ You need a Discord bot token and the bot must be invited to your server.
 3. **Set environment variables for Discord config:**
    The following environment variables are required:
    - `DISCORD_TOKEN`: Your bot token
-   - `DISCORD_GUILD_ID`: Your server (guild) ID
-   - Other Discord-related config as needed by your implementation
+
+4. **Run slash command `/setup` in your discord server**
+    This command will configure essential information, such as the guild ID, for your server.
 
 Example `.env` file:
 ```env
 DISCORD_TOKEN=your-bot-token
-DISCORD_GUILD_ID=your-guild-id
 TORRENT_HOST=localhost
 TORRENT_PORT=8080
 TORRENT_CREDENTIALS_USERNAME=admin
@@ -78,3 +78,5 @@ MIT
 
 - [-] Torrent management
 - [ ] PC management commands
+- [ ] GuildID from envvars
+- [ ] Generate Docker Image
