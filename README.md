@@ -55,11 +55,11 @@ You need a Discord bot token and the bot must be invited to your server.
 
 Example `.env` file:
 ```env
-DISCORD_TOKEN=your-bot-token
-TORRENT_HOST=localhost
-TORRENT_PORT=8080
-TORRENT_CREDENTIALS_USERNAME=admin
-TORRENT_CREDENTIALS_PASSWORD=adminadmin
+BPM_DISCORD_TOKEN=<bot-token>
+BPM_TORRENT_QBITORRENT_HOST=localhost
+BPM_TORRENT_QBITORRENT_PORT=8080
+BPM_TORRENT_QBITORRENT_USER=admin
+BPM_TORRENT_QBITORRENT_PASS=admin
 ```
 
 ## Configuration

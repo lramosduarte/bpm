@@ -1,0 +1,9 @@
+version: "3.8"
+services:
+  bpm:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - ./.local.env
+    restart: "unless-stopped"
